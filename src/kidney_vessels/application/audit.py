@@ -83,10 +83,9 @@ def _presence(records: list[AnnotationRecord]) -> AnnotationPresence:
 
 
 def _valid_offset(value: str) -> bool:
-    try:
-        return int(value) >= 0 and str(int(value)) == value.strip()
-    except ValueError:
-        return False
+    # В исходном tile_meta.csv смещения могут содержать ведущие нули.
+    digits = value.strip()
+    return digits.isascii() and digits.isdecimal()
 
 
 def _annotation_rows(
