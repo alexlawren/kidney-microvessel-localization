@@ -121,7 +121,7 @@ uv run --locked pytest
 ```
 
 CI запускает эти проверки на Windows и Linux с Python 3.12.
-Коммиты: Conventional Commits, например `feat: add hubmap dataset audit`.
+Правила веток, коммитов и Pull Request описаны в [Git Workflow](docs/git-workflow.md).
 
 ## Устройство и следующие решения
 

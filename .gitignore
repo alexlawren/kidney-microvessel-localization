@@ -14,9 +14,47 @@ dist/
 htmlcov/
 /data/
 /reports/
+/tmp/
+/.tmp/
+*.tmp
+
+# Данные HuBMAP и изображения вне каталога data/
+polygons.jsonl
+tile_meta.csv
+wsi_meta.csv
+*.tif
+*.tiff
+*.svs
+*.ndpi
+*.mrxs
+*.scn
+*.dcm
+*.dicom
+*.png
+*.jpg
+*.jpeg
+
+# Архивы датасетов и локальные выгрузки
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.7z
+*.rar
+
+# Секреты и локальные учётные данные
 .env
 .env.*
 !.env.example
+kaggle.json
+.netrc
+/.aws/
+/secrets/
+*.pem
+*.key
+*.p12
+*.pfx
+
 .idea/
 .vscode/
 .worktrees/
