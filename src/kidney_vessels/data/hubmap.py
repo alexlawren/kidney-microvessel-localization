@@ -2,15 +2,31 @@
 
 import csv
 import json
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass
 from math import isfinite
 from pathlib import Path
 from typing import cast
 
 from kidney_vessels.annotations import validate_geometry
-from kidney_vessels.domain import AuditIssue, GeometricAnnotation, SourceCategory
+from kidney_vessels.domain import (
+    AnnotationCompleteness,
+    AnnotationPresence,
+    AnnotationStatus,
+    AuditIssue,
+    GeometricAnnotation,
+    SourceCategory,
+)
 
+HUBMAP_DATASET = "hubmap-human-vasculature-2023"
 KNOWN_CATEGORIES = frozenset({"blood_vessel", "glomerulus", "unsure"})
+IMAGE_SUFFIXES = frozenset({".tif", ".tiff", ".png", ".jpg", ".jpeg"})
+TILE_METADATA_COLUMNS = {"id", "source_wsi", "dataset", "i", "j"}
+SUBSET_POLICY = {
+    "1": (AnnotationStatus.EXPERT_REVIEWED, AnnotationCompleteness.UNKNOWN),
+    "2": (AnnotationStatus.NOT_REVIEWED, AnnotationCompleteness.SPARSE),
+    "3": (AnnotationStatus.UNANNOTATED, AnnotationCompleteness.UNANNOTATED),
+}
 
 
 class DatasetStructureError(ValueError):
@@ -43,6 +59,35 @@ class AnnotationReadResult:
 
     records: tuple[AnnotationRecord, ...]
     issues: tuple[AuditIssue, ...]
+
+
+def is_train_image(path: Path) -> bool:
+    """Определить поддерживаемый файл тайла в train."""
+    return path.is_file() and path.suffix.lower() in IMAGE_SUFFIXES
+
+
+def discover_train_entries(root: Path) -> list[Path]:
+    """Проверить структуру HuBMAP и вернуть записи каталога train."""
+    for name in ("train", "polygons.jsonl", "tile_meta.csv", "wsi_meta.csv"):
+        path = root / name
+        if not (path.is_dir() if name == "train" else path.is_file()):
+            raise DatasetStructureError(f"Отсутствует обязательный путь: {path}")
+    entries = sorted((root / "train").iterdir(), key=lambda path: path.name)
+    if not any(is_train_image(path) for path in entries):
+        raise DatasetStructureError(f"В {root / 'train'} нет поддерживаемых изображений")
+    return entries
+
+
+def annotation_presence(records: Sequence[AnnotationRecord]) -> AnnotationPresence:
+    """Описать фактические записи тайла независимо от полноты набора."""
+    if not records:
+        return AnnotationPresence.MISSING
+    if len(records) > 1 or any(
+        not record.valid or any(annotation.errors for annotation in record.annotations)
+        for record in records
+    ):
+        return AnnotationPresence.INVALID
+    return AnnotationPresence.PRESENT if records[0].annotations else AnnotationPresence.EMPTY
 
 
 def read_metadata(path: Path, key: str, required: set[str]) -> MetadataTable:
@@ -135,7 +180,9 @@ def _read_object(
     )
 
 
-def read_annotations(path: Path, dimensions: dict[str, tuple[int, int]]) -> AnnotationReadResult:
+def read_annotations(
+    path: Path, dimensions: dict[str, tuple[int, int]], *, skip_image_ids: Collection[str] = ()
+) -> AnnotationReadResult:
     """Читать построчно; ошибки строки/объекта не прерывают остальные записи."""
     records: list[AnnotationRecord] = []
     issues: list[AuditIssue] = []
@@ -157,6 +204,8 @@ def read_annotations(path: Path, dimensions: dict[str, tuple[int, int]]) -> Anno
                     if not isinstance(identifier, str) or not identifier.strip():
                         raise ValueError("Поле id должно быть непустой строкой")
                     image_id = identifier
+                    if image_id in skip_image_ids:
+                        continue
                     if image_id in seen:
                         issues.append(
                             AuditIssue(

@@ -131,6 +131,11 @@ class PolygonGeometry:
             max(point.y for point in points),
         )
 
+    def fits_tile(self, width: int, height: int) -> bool:
+        """Проверить границы уже валидированной геометрии на выбранном тайле."""
+        left, top, right, bottom = self.bbox
+        return 0 <= left <= right < width and 0 <= top <= bottom < height
+
 
 @dataclass(frozen=True)
 class GeometricAnnotation:
