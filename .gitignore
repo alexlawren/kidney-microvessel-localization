@@ -14,6 +14,11 @@ dist/
 htmlcov/
 /data/
 /reports/
+/checkpoints/
+*.pth
+*.pt
+*.ckpt
+*.safetensors
 /tmp/
 /.tmp/
 *.tmp

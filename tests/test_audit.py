@@ -160,6 +160,24 @@ def test_missing_wsi_fields_are_visible(dataset: Path, tmp_path: Path) -> None:
     assert any(issue.code == "missing_wsi_field" for issue in result.issues)
 
 
+def test_hubmap_offsets_with_leading_zeros_remain_valid_and_lossless(
+    dataset: Path, tmp_path: Path
+) -> None:
+    path = dataset / "tile_meta.csv"
+    original = path.read_text(encoding="utf-8")
+    path.write_text(original.replace("a,1,1,0,0", "a,1,1,08192,00768"), encoding="utf-8")
+    result = run_audit(AuditConfig(dataset, tmp_path / "reports", examples=0))
+    assert not any(issue.code == "invalid_tile_offset" for issue in result.issues)
+    row = next(row for row in result.images if row["image_id"] == "a")
+    assert row["tile_metadata"] == {
+        "id": "a",
+        "source_wsi": "1",
+        "dataset": "1",
+        "i": "08192",
+        "j": "00768",
+    }
+
+
 def test_damaged_tiff_dimensions_do_not_abort_audit(dataset: Path, tmp_path: Path) -> None:
     path = dataset / "train" / "b.tif"
     content = bytearray(path.read_bytes())
