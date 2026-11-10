@@ -7,8 +7,14 @@ from hashlib import file_digest
 from pathlib import Path
 
 from kidney_vessels.data.hubmap import (
+    HUBMAP_DATASET,
+    SUBSET_POLICY,
+    TILE_METADATA_COLUMNS,
     AnnotationRecord,
     DatasetStructureError,
+    annotation_presence,
+    discover_train_entries,
+    is_train_image,
     read_annotations,
     read_metadata,
 )
@@ -23,12 +29,6 @@ from kidney_vessels.domain import (
 )
 
 logger = logging.getLogger(__name__)
-IMAGE_SUFFIXES = frozenset({".tif", ".tiff", ".png", ".jpg", ".jpeg"})
-SUBSET_POLICY = {
-    "1": (AnnotationStatus.EXPERT_REVIEWED, AnnotationCompleteness.UNKNOWN),
-    "2": (AnnotationStatus.NOT_REVIEWED, AnnotationCompleteness.SPARSE),
-    "3": (AnnotationStatus.UNANNOTATED, AnnotationCompleteness.UNANNOTATED),
-}
 
 
 @dataclass(frozen=True)
@@ -59,27 +59,10 @@ def _check_paths(config: AuditConfig) -> list[Path]:
     root, output = config.input.resolve(), config.output.resolve()
     if root == output or root in output.parents or output in root.parents:
         raise DatasetStructureError("Каталоги input и output не должны пересекаться")
-    for name in ("train", "polygons.jsonl", "tile_meta.csv", "wsi_meta.csv"):
-        path = root / name
-        if not (path.is_dir() if name == "train" else path.is_file()):
-            raise DatasetStructureError(f"Отсутствует обязательный путь: {path}")
+    files = discover_train_entries(root)
     if output.exists() and (not output.is_dir() or any(output.iterdir())):
         raise DatasetStructureError(f"Каталог output непуст или не является каталогом: {output}")
-    files = sorted((root / "train").iterdir(), key=lambda path: path.name)
-    if not any(path.is_file() and path.suffix.lower() in IMAGE_SUFFIXES for path in files):
-        raise DatasetStructureError(f"В {root / 'train'} нет поддерживаемых изображений")
     return files
-
-
-def _presence(records: list[AnnotationRecord]) -> AnnotationPresence:
-    if not records:
-        return AnnotationPresence.MISSING
-    if len(records) > 1 or any(
-        not record.valid or any(annotation.errors for annotation in record.annotations)
-        for record in records
-    ):
-        return AnnotationPresence.INVALID
-    return AnnotationPresence.PRESENT if records[0].annotations else AnnotationPresence.EMPTY
 
 
 def _valid_offset(value: str) -> bool:
@@ -136,14 +119,10 @@ def run_audit(config: AuditConfig) -> AuditResult:
 
     files = _check_paths(config)
     root, output = config.input.resolve(), config.output.resolve()
-    tile_table = read_metadata(
-        root / "tile_meta.csv", "id", {"id", "source_wsi", "dataset", "i", "j"}
-    )
+    tile_table = read_metadata(root / "tile_meta.csv", "id", TILE_METADATA_COLUMNS)
     wsi_table = read_metadata(root / "wsi_meta.csv", "source_wsi", {"source_wsi"})
     issues = [*tile_table.issues, *wsi_table.issues]
-    image_files = [
-        path for path in files if path.is_file() and path.suffix.lower() in IMAGE_SUFFIXES
-    ]
+    image_files = [path for path in files if is_train_image(path)]
     ids = Counter(path.stem for path in image_files)
     dimensions: dict[str, tuple[int, int]] = {}
     images: list[dict[str, object]] = []
@@ -254,7 +233,7 @@ def run_audit(config: AuditConfig) -> AuditResult:
                     path,
                     width,
                     height,
-                    ImageOrigin("hubmap-human-vasculature-2023", wsi, patient, subset),
+                    ImageOrigin(HUBMAP_DATASET, wsi, patient, subset),
                 )
         except ImageReadError as exc:
             issues.append(AuditIssue("error", "corrupt_image", str(exc), source, image_id))
@@ -300,7 +279,7 @@ def run_audit(config: AuditConfig) -> AuditResult:
     for row in images:
         image_id = str(row["image_id"])
         records = grouped.get(image_id, [])
-        presence = _presence(records)
+        presence = annotation_presence(records)
         row["annotation_presence"] = presence.value
         row["annotation_count"] = sum(len(record.annotations) for record in records)
         if row["dataset"] in {"1", "2"} and presence in {
